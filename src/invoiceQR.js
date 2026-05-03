@@ -28,25 +28,51 @@ const jsQR = require('jsqr');
 // ── QR Code 掃描 ──────────────────────────────────────────────
 
 /**
- * 從圖片 Buffer 解析所有 QR Code
+ * 從圖片 Buffer 解析所有 QR Code（支援左右兩個）
  * @param {Buffer} imageBuffer
  * @returns {string[]} QR Code 文字陣列
  */
 async function scanQRCodes(imageBuffer) {
   const image = await Jimp.read(imageBuffer);
-  const { data, width, height } = image.bitmap;
+  const { width, height } = image.bitmap;
+  const results = [];
 
-  // jsQR 需要 RGBA Uint8ClampedArray
-  const uint8 = new Uint8ClampedArray(data);
-  const code = jsQR(uint8, width, height, { inversionAttempts: 'dontInvert' });
+  // 掃描整張圖
+  const codes = scanImage(image);
+  results.push(...codes);
 
-  if (!code) {
-    // 嘗試反色（深色背景的發票）
-    const codeInv = jsQR(uint8, width, height, { inversionAttempts: 'onlyInvert' });
-    if (!codeInv) return [];
-    return [codeInv.data];
+  // 若整張只掃到一個，嘗試裁切左半部再掃（抓左側發票 QR Code）
+  if (results.length <= 1) {
+    const left = image.clone().crop(0, 0, Math.floor(width / 2), height);
+    const leftCodes = scanImage(left);
+    for (const c of leftCodes) {
+      if (!results.includes(c)) results.push(c);
+    }
   }
-  return [code.data];
+
+  // 也掃右半部（取得商品明細備用）
+  if (results.length <= 1) {
+    const right = image.clone().crop(Math.floor(width / 2), 0, Math.ceil(width / 2), height);
+    const rightCodes = scanImage(right);
+    for (const c of rightCodes) {
+      if (!results.includes(c)) results.push(c);
+    }
+  }
+
+  return results;
+}
+
+function scanImage(image) {
+  const { data, width, height } = image.bitmap;
+  const uint8 = new Uint8ClampedArray(data);
+  const results = [];
+  const code = jsQR(uint8, width, height, { inversionAttempts: 'dontInvert' });
+  if (code) results.push(code.data);
+  else {
+    const inv = jsQR(uint8, width, height, { inversionAttempts: 'onlyInvert' });
+    if (inv) results.push(inv.data);
+  }
+  return results;
 }
 
 // ── 台灣電子發票格式解析 ──────────────────────────────────────
