@@ -157,6 +157,8 @@ async function parseInvoiceFromImage(imageBuffer) {
     }
 
     for (const code of codes) {
+      console.log('[invoiceQR] 掃到 QR Code 內容（前80字）:', code.substring(0, 80));
+      console.log('[invoiceQR] isTaiwanInvoice:', isTaiwanInvoiceQR(code));
       const invoice = parseInvoiceQR(code);
       if (invoice) {
         return { success: true, invoice };
