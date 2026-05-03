@@ -24,6 +24,8 @@ const { runLotteryCheck, formatInvTerm } = require('./lotteryService');
 const { tryManualEntry, handlePendingFlow, handleEditCategoryStart } = require('./manualEntryFlow');
 const { analyzeInvoiceImage, detectMimeType } = require('./claude');
 const { formatAmount } = require('./currencyService');
+const { parseInvoiceFromImage, formatInvoiceResult } = require('./invoiceQR');
+const { categorize } = require('./einvoice');
 // report.js placeholder
 // const { generateReport } = require('./report');
 // const { analyzeInvoiceImage } = require('./claude');
@@ -186,10 +188,85 @@ async function handleTextMessage(lineUserId, event) {
 
 async function handleImageMessage(lineUserId, event) {
   const token = event.replyToken;
-  await reply(token, [{
+
+  // 下載圖片
+  let imageBuffer;
+  try {
+    const stream = await client.getMessageContent(event.message.id);
+    imageBuffer = await streamToBuffer(stream);
+  } catch (err) {
+    return reply(token, [{ type: 'text', text: '❌ 圖片下載失敗，請重新傳送。' }]);
+  }
+
+  // 嘗試掃描 QR Code
+  await reply(token, [{ type: 'text', text: '🔍 掃描發票 QR Code 中...' }]);
+
+  const result = await parseInvoiceFromImage(imageBuffer);
+
+  if (result.success) {
+    const inv = result.invoice;
+    const storeName = inv.sellerBAN ? `統編 ${inv.sellerBAN}` : '未知商家';
+    const itemName  = inv.items.length > 0 ? inv.items[0].name : storeName;
+    const category  = categorize(storeName, itemName);
+
+    // 儲存到資料庫
+    try {
+      await db.insertRecord({
+        lineUserId,
+        source:     'qr',
+        invNum:     inv.invNum,
+        invDate:    inv.invDate,
+        sellerName: storeName,
+        itemName:   inv.items.length > 0 ? inv.items.map(i => i.name).join('、') : storeName,
+        quantity:   1,
+        unitPrice:  inv.totalAmount,
+        amount:     inv.totalAmount,
+        category,
+      });
+    } catch (dbErr) {
+      console.error('[lineHandler] 儲存失敗：', dbErr.message);
+    }
+
+    const text = formatInvoiceResult(inv, category);
+    return client.pushMessage(lineUserId, [{ type: 'text', text }]);
+  }
+
+  if (result.error === 'no_qr') {
+    return client.pushMessage(lineUserId, [{
+      type: 'text',
+      text: [
+        '📷 找不到 QR Code',
+        '',
+        '請確認：',
+        '1. 照片包含發票左側的 QR Code',
+        '2. 圖片清晰、光線充足',
+        '3. QR Code 沒有被遮住',
+        '',
+        '或改用手動記帳：',
+        '「午餐 150」「計程車 320 交通」',
+      ].join('\n'),
+    }]);
+  }
+
+  // QR Code 存在但不是發票格式
+  return client.pushMessage(lineUserId, [{
     type: 'text',
-    text: '📷 拍照辨識功能即將開放，敬請期待！\n\n目前可用手動記帳：\n「午餐 150」「計程車 320 交通」',
+    text: [
+      '📷 偵測到 QR Code，但不是電子發票格式。',
+      '',
+      '請傳送含有電子發票 QR Code 的照片，',
+      '或改用手動記帳：「午餐 150」',
+    ].join('\n'),
   }]);
+}
+
+function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', c => chunks.push(c));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
 }
 
 /*
@@ -310,6 +387,8 @@ async function handleRecentRecords(lineUserId, token) {
   }
 
   const { formatAmount } = require('./currencyService');
+const { parseInvoiceFromImage, formatInvoiceResult } = require('./invoiceQR');
+const { categorize } = require('./einvoice');
   const lines = ['🧾 最近 10 筆記錄', '─────────────────'];
   for (const r of records) {
     const date = r.inv_date ? r.inv_date.substring(5) : '?'; // MM-DD
