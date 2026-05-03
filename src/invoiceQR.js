@@ -56,7 +56,8 @@ async function scanQRCodes(imageBuffer) {
  */
 function isTaiwanInvoiceQR(text) {
   // 左側 QR Code: 開頭為發票號碼 (2英文+8數字)，後面接 : 分隔欄位
-  return /^[A-Z]{2}\d{8}:/.test(text);
+  // 支援 ZJ52426050: 或 ZJ-52426050: 兩種格式
+  return /^[A-Z]{2}-?\d{8}:/.test(text);
 }
 
 /**
@@ -72,7 +73,7 @@ function parseInvoiceQR(qrText) {
 
   try {
     // 基本資訊
-    const invNum   = parts[0];                        // 發票號碼
+    const invNum   = parts[0].replace('-', '');       // 發票號碼（去除連字號）
     const dateRaw  = parts[1];                        // 民國日期 YYYMMDD
     const totalHex = parts[4];                        // 總計(含稅) 16進位
 
