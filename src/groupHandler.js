@@ -60,12 +60,7 @@ async function handleGroupEvent(event, client) {
   } catch {}
   try { await upsertSplitMember(groupId, userId, displayName); } catch {}
 
-  // image recognition disabled
-  if (event.type === 'message' && event.message.type === 'image') {
-    return client.replyMessage(event.replyToken, {
-      type: 'text', text: 'Photo recognition coming soon. Use: /add description amount'
-    });
-  }
+  // 群組圖片：靜默不回應
   if (event.type === 'message' && event.message.type === 'text')
     return handleGroupText(event, client, groupId, userId, displayName);
   if (event.type === 'postback')
